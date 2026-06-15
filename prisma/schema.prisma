@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  topics         Topic[]
+  dailySessions  DailySession[]
+  progress       Progress[]
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Topic {
+  id          String   @id @default(cuid())
+  adminId     String
+  name        String
+  description String   @default("")
+  difficulty  String   @default("beginner")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  admin         Admin          @relation(fields: [adminId], references: [id])
+  dailySessions DailySession[]
+  progress      Progress[]
+
+  @@index([adminId])
+}
+
+model DailySession {
+  id        String   @id @default(cuid())
+  adminId   String
+  topicId   String
+  date      DateTime
+  summary   String   @default("")
+  embedding String?  // pgvector string representation
+  createdAt DateTime @default(now())
+
+  admin     Admin     @relation(fields: [adminId], references: [id])
+  topic     Topic     @relation(fields: [topicId], references: [id])
+  questions Question[]
+
+  @@index([adminId, date])
+  @@index([topicId])
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  sessionId     String
+  questionText  String
+  correctAnswer String
+  userAnswer    String?
+  isCorrect     Boolean?
+  feedback      String?
+  embedding     String?  // pgvector string representation
+  createdAt     DateTime @default(now())
+
+  session DailySession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+}
+
+model Progress {
+  id              String   @id @default(cuid())
+  adminId         String
+  topicId         String
+  date            DateTime
+  score           Float
+  conceptsLearned String[] @default([])
+  createdAt       DateTime @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id])
+  topic Topic @relation(fields: [topicId], references: [id])
+
+  @@unique([adminId, topicId, date])
+  @@index([adminId])
+  @@index([topicId])
+}

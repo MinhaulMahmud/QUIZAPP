@@ -92,7 +92,13 @@ $PRISMA_CMD db push 2>&1 || echo "⚠️  db push skipped (expected on Termux/An
 
 echo ""
 echo "=== 6. Build for production ==="
-npm run build
+# Turbopack lacks native bindings on Android/ARM64 — fall back to Webpack
+if uname -a | grep -qi android; then
+  echo "(Android detected, using Webpack instead of Turbopack)"
+  npm run build:webpack
+else
+  npm run build
+fi
 
 echo ""
 echo "=== 7. Install Cloudflare Tunnel (for public URL) ==="

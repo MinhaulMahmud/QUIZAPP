@@ -32,43 +32,35 @@ echo "=== 3. Install Node dependencies ==="
 npm install
 
 echo "=== 4. Configure environment ==="
-echo ""
-echo "You need two FREE cloud databases (no credit card required):"
-echo ""
-echo "  Postgres: https://neon.tech  (free tier, supports pgvector)"
-echo "  Redis:    https://upstash.com (free tier, 30MB)"
-echo ""
-echo "Sign up using Google/GitHub — no credit card needed."
-echo ""
+if [ -f .env ]; then
+  echo "  .env exists — skipping (remove .env to reconfigure)"
+else
+  > .env
+  echo "--- Postgres (Neon) ---"
+  echo "Paste your DATABASE_URL from Neon:"
+  read -r db_url
+  echo "DATABASE_URL=\"$db_url\"" >> .env
 
-# Create .env step by step
-> .env
+  echo "--- Redis (Upstash) ---"
+  echo "Paste your REDIS_URL from Upstash (starts with redis://):"
+  read -r redis_url
+  echo "REDIS_URL=\"$redis_url\"" >> .env
 
-echo "--- Postgres (Neon) ---"
-echo "Paste your DATABASE_URL from Neon:"
-read -r db_url
-echo "DATABASE_URL=\"$db_url\"" >> .env
+  echo "--- Telegram Bot ---"
+  echo "Paste your Bot Token from @BotFather:"
+  read -r bot_token
+  echo "TELEGRAM_BOT_TOKEN=\"$bot_token\"" >> .env
 
-echo "--- Redis (Upstash) ---"
-echo "Paste your REDIS_URL from Upstash (starts with redis://):"
-read -r redis_url
-echo "REDIS_URL=\"$redis_url\"" >> .env
+  echo "--- OpenRouter AI ---"
+  echo "Paste your OpenRouter API Key:"
+  read -r openrouter_key
+  echo "OPENROUTER_API_KEY=\"$openrouter_key\"" >> .env
 
-echo "--- Telegram Bot ---"
-echo "Paste your Bot Token from @BotFather:"
-read -r bot_token
-echo "TELEGRAM_BOT_TOKEN=\"$bot_token\"" >> .env
-
-echo "--- OpenRouter AI ---"
-echo "Paste your OpenRouter API Key:"
-read -r openrouter_key
-echo "OPENROUTER_API_KEY=\"$openrouter_key\"" >> .env
-
-# Fixed values
-echo 'JWT_SECRET="daily-quiz-jwt-secret-change-in-prod"' >> .env
-echo 'ENCRYPTION_KEY="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"' >> .env
-echo 'NEXT_PUBLIC_APP_URL="http://localhost:3000"' >> .env
-echo 'TELEGRAM_CHAT_ID=""' >> .env
+  echo 'JWT_SECRET="daily-quiz-jwt-secret-change-in-prod"' >> .env
+  echo 'ENCRYPTION_KEY="a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"' >> .env
+  echo 'NEXT_PUBLIC_APP_URL="http://localhost:3000"' >> .env
+  echo 'TELEGRAM_CHAT_ID=""' >> .env
+fi
 
 echo ""
 echo "=== 5. Push database schema ==="

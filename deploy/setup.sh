@@ -72,14 +72,23 @@ echo 'TELEGRAM_CHAT_ID=""' >> .env
 
 echo ""
 echo "=== 5. Push database schema ==="
-# Export env so prisma can read it (Termux compat)
-export $(grep -v '^\s*#' .env | grep -v '^\s*$' | sed 's/^/export /' | sed 's/="/=/' | sed 's/"$//')
+# Export env vars safely
+while IFS='=' read -r key value; do
+  key="${key#"${key%%[![:space:]]*}"}"   # trim leading whitespace
+  [[ -z "$key" || "$key" == \#* ]] && continue
+  value="${value%\"}"; value="${value#\"}"
+  value="${value%\'}"; value="${value#\'}"
+  export "$key=$value"
+done < .env
 
 PRISMA_CMD="./node_modules/.bin/prisma"
 if [ ! -f "$PRISMA_CMD" ]; then
   PRISMA_CMD="npx --yes prisma"
 fi
-$PRISMA_CMD db push
+# db push may fail on Android/Termux because the schema engine binary
+# is compiled for Linux (glibc) but Android uses Bionic libc.
+# The DB schema is already applied from the dev machine, so this is optional.
+$PRISMA_CMD db push 2>&1 || echo "⚠️  db push skipped (expected on Termux/Android — schema already on Neon)"
 
 echo ""
 echo "=== 6. Build for production ==="

@@ -21,8 +21,14 @@ fi
 echo "Starting app from: $REPO_DIR"
 cd "$REPO_DIR"
 
-# Export .env vars
-export $(grep -v '^\s*#' .env | grep -v '^\s*$' | sed 's/^/export /' | sed 's/="/=/' | sed 's/"$//')
+# Export .env vars safely
+while IFS='=' read -r key value; do
+  key="${key#"${key%%[![:space:]]*}"}"
+  [[ -z "$key" || "$key" == \#* ]] && continue
+  value="${value%\"}"; value="${value#\"}"
+  value="${value%\'}"; value="${value#\'}"
+  export "$key=$value"
+done < .env
 
 echo "=== Starting Daily Quiz App ==="
 NODE_ENV=production npx next start --port 3000 &

@@ -39,7 +39,18 @@ export async function runMorningCron(): Promise<void> {
 
     for (const topic of activeTopics) {
       try {
-        const quizJson = await generateQuiz(topic.name, topic.difficulty);
+        const prevQuestions = await prisma.question.findMany({
+          where: { session: { topicId: topic.id } },
+          select: { questionText: true },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
+        const quizJson = await generateQuiz(
+          topic.name,
+          topic.difficulty,
+          undefined,
+          prevQuestions.map((q) => q.questionText)
+        );
         const quiz = JSON.parse(quizJson);
 
         if (!quiz.questions || quiz.questions.length === 0) {

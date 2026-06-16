@@ -37,11 +37,15 @@ export async function resetClient(): Promise<void> {
 export async function generateQuiz(
   topic: string,
   difficulty: string,
-  weakAreas?: string
+  weakAreas?: string,
+  previousQuestions?: string[]
 ): Promise<string> {
   const client = await getClient();
 
   const weakAreaHint = weakAreas ? `\nFocus extra attention on these weak areas: ${weakAreas}` : "";
+  const prevQHint = (previousQuestions && previousQuestions.length > 0)
+    ? `\nPreviously asked questions (DO NOT repeat any of these):\n${previousQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+    : "";
 
   const response = await client.chat.completions.create({
     model: "openai/gpt-4o-mini",
@@ -50,6 +54,7 @@ export async function generateQuiz(
         role: "system",
         content: `You are a quiz generator. Generate exactly 5 multiple-choice quiz questions.
 Each question must have 4 options (A, B, C, D) with exactly one correct answer.
+CRITICAL: Never repeat or rephrase any previously asked questions. Cover new subtopics and aspects.
 Return ONLY valid JSON with this exact structure, no markdown formatting:
 {
   "topic": "${topic}",
@@ -66,7 +71,7 @@ Return ONLY valid JSON with this exact structure, no markdown formatting:
       },
       {
         role: "user",
-        content: `Generate 5 quiz questions about "${topic}" at ${difficulty} level.${weakAreaHint}`,
+        content: `Generate 5 quiz questions about "${topic}" at ${difficulty} level.${weakAreaHint}${prevQHint}`,
       },
     ],
     response_format: { type: "json_object" },

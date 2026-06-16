@@ -113,7 +113,8 @@ export function setupBotHandlers(bot: Telegraf): void {
           await redis?.expire(lockKey, 120);
 
           await ctx.reply(`🧠 Generating quiz for "${topic.name}"...`);
-          const quizJson = await generateQuiz(topic.name, topic.difficulty);
+          const prevQuestions = await getPreviousQuestions(topic.id);
+          const quizJson = await generateQuiz(topic.name, topic.difficulty, undefined, prevQuestions);
           quizData = quizJson;
           await redis?.set(quizKey, quizJson, "EX", 86400);
           const dateKey = await getDailyKey("topics");
@@ -175,7 +176,8 @@ export function setupBotHandlers(bot: Telegraf): void {
 
       const weakHint =
         weakAreas.length > 0 ? `Focus on: ${weakAreas.slice(0, 3).join(", ")}` : undefined;
-      const quizJson = await generateQuiz(topic.name, topic.difficulty, weakHint);
+      const prevQuestions = await getPreviousQuestions(topic.id);
+      const quizJson = await generateQuiz(topic.name, topic.difficulty, weakHint, prevQuestions);
       const quiz = JSON.parse(quizJson);
 
       await ctx.reply(
@@ -211,7 +213,7 @@ export function setupBotHandlers(bot: Telegraf): void {
 
       const lines = topics.map(
         (t) =>
-          `${t.active ? "✅" : "⏸️"} *${t.name}* (${t.difficulty})${t.active ? "" : " — inactive"}`
+          `${t.active ? "✅" : "⏸️"} *${t.name}* (${t.difficulty})${t.completed ? " — ✅ completed" : ` — ${t.quizCount} quizzes done`}`
       );
       await ctx.reply(`*Your Topics:*\n\n${lines.join("\n")}`, {
         parse_mode: "Markdown",
@@ -248,23 +250,34 @@ export function setupBotHandlers(bot: Telegraf): void {
       const recent5 = progress.slice(0, 5);
       const streak = calcStreak(progress.map((p) => p.date));
 
+      const topics = await prisma.topic.findMany({
+        where: { adminId: admin.id },
+        select: { name: true, quizCount: true, completed: true },
+      });
+      const completedTopics = topics.filter((t) => t.completed).length;
+      const topicSummary = topics
+        .filter((t) => !t.completed)
+        .map((t) => `${t.name} (${t.quizCount} quizzes)`).join(", ");
+
       const lines = [
         `📊 *Your Progress Stats*`,
         ``,
         `Total quizzes: ${totalQuizzes}`,
         `Average score: ${avgScore.toFixed(1)}%`,
         `Current streak: ${streak} day${streak === 1 ? "" : "s"}`,
+        `Topics completed: ${completedTopics}`,
+        topicSummary ? `In progress: ${topicSummary}` : null,
         ``,
         `*Recent:*`,
         ...recent5.map(
           (p) =>
             `  ${new Date(p.date).toLocaleDateString()} — *${p.topic.name}* — ${p.score}%`
         ),
-      ];
+      ].filter(Boolean);
 
-      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+      await ctx.reply(lines.join("\n"));
     } catch (error) {
-      console.error("Stats command error:", error);
+      console.error("Stats command error:", error instanceof Error ? error.stack : error);
       await ctx.reply("Something went wrong.");
     }
   });
@@ -306,10 +319,6 @@ export function setupBotHandlers(bot: Telegraf): void {
       const correctOption = question.options[question.correctAnswer];
       const isCorrect = optionIndex === question.correctAnswer;
 
-      const feedback = isCorrect
-        ? `✅ *Correct!* ${question.explanation}`
-        : `❌ *Incorrect.* Correct answer: *${correctOption}*\n\n${question.explanation}`;
-
       const answersKey = await getDailyKey(`answers:${topicId}`);
       const existingAnswers = await redis?.get(answersKey);
       const answers = existingAnswers ? JSON.parse(existingAnswers) : [];
@@ -322,7 +331,7 @@ export function setupBotHandlers(bot: Telegraf): void {
       });
       await redis?.set(answersKey, JSON.stringify(answers), "EX", 86400);
 
-      await ctx.answerCbQuery(isCorrect ? "✅ Correct!" : "❌ Incorrect");
+      await ctx.answerCbQuery(isCorrect ? "✅" : "❌");
 
       if (
         ctx.callbackQuery.message &&
@@ -336,19 +345,102 @@ export function setupBotHandlers(bot: Telegraf): void {
         });
       }
 
-      await ctx.reply(feedback, { parse_mode: "Markdown" });
+      const answeredIndices = new Set(
+        answers
+          .filter((a: { questionIndex: number }) => a.questionIndex < quiz.questions.length)
+          .map((a: { questionIndex: number }) => a.questionIndex)
+      );
+      if (answeredIndices.size < quiz.questions.length) return;
 
-      const nextIndex = questionIndex + 1;
-      if (nextIndex < quiz.questions.length && ctx.chat) {
-        await sendQuestion(ctx.chat.id, topicId, quiz, nextIndex);
-      } else {
-        const total = quiz.questions.length;
-        const correctCount = answers.filter((a: { isCorrect: boolean }) => a.isCorrect).length;
-        const pct = Math.round((correctCount / total) * 100);
-        await ctx.reply(
-          `🎉 *Quiz Complete!*\n\nYou got *${correctCount}/${total}* correct (${pct}%).\n\nCheck /stats for your full progress.`,
-          { parse_mode: "Markdown" }
+      const total = quiz.questions.length;
+      const seen = new Set<number>();
+      const uniqueAnswers = answers.filter((a: { questionIndex: number }) => {
+        if (seen.has(a.questionIndex)) return false;
+        seen.add(a.questionIndex);
+        return true;
+      });
+      const correctCount = uniqueAnswers.filter((a: { isCorrect: boolean }) => a.isCorrect).length;
+      const pct = Math.round((correctCount / total) * 100);
+
+      const resultLines = uniqueAnswers
+        .sort((a: { questionIndex: number }, b: { questionIndex: number }) => a.questionIndex - b.questionIndex)
+        .map(
+          (a: { questionText: string; isCorrect: boolean; correctOption: string; selectedOption: string; questionIndex: number }, i: number) =>
+            `${i + 1}. ${a.isCorrect ? "✅" : "❌"} ${a.questionText}\n   Your answer: ${a.selectedOption} | Correct: ${a.correctOption}`
         );
+
+      await ctx.reply(
+        `🎉 *Quiz Complete!*\n\nYou got *${correctCount}/${total}* correct (${pct}%).\n\n${resultLines.join("\n\n")}`,
+        { parse_mode: "Markdown" }
+      );
+
+      // Save results immediately so /stats and knowledge base work without waiting for midnight cron
+      try {
+        const admin = await prisma.admin.findFirst();
+        if (admin) {
+          const cleanTopicId = topicId.replace(/^practice_/, "");
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          let session = await prisma.dailySession.findFirst({
+            where: { adminId: admin.id, topicId: cleanTopicId, date: today },
+          });
+
+          if (!session) {
+            session = await prisma.dailySession.create({
+              data: {
+                adminId: admin.id,
+                topicId: cleanTopicId,
+                date: today,
+                summary: "",
+              },
+            });
+          }
+
+          await prisma.question.deleteMany({ where: { sessionId: session.id } });
+
+          for (let qi = 0; qi < quiz.questions.length; qi++) {
+            const q = quiz.questions[qi];
+            const userAns = answers.find(
+              (a: { questionIndex: number }) => a.questionIndex === qi
+            );
+            await prisma.question.create({
+              data: {
+                sessionId: session.id,
+                questionText: q.question,
+                correctAnswer: q.options[q.correctAnswer],
+                userAnswer: userAns?.selectedOption || null,
+                isCorrect: userAns?.isCorrect ?? null,
+                feedback: q.explanation || null,
+              },
+            });
+          }
+
+          await prisma.progress.upsert({
+            where: {
+              adminId_topicId_date: {
+                adminId: admin.id,
+                topicId: cleanTopicId,
+                date: today,
+              },
+            },
+            update: { score: pct },
+            create: {
+              adminId: admin.id,
+              topicId: cleanTopicId,
+              date: today,
+              score: pct,
+              conceptsLearned: [],
+            },
+          });
+
+          await prisma.topic.update({
+            where: { id: cleanTopicId },
+            data: { quizCount: { increment: 1 } },
+          });
+        }
+      } catch (saveError) {
+        console.error("Failed to save quiz results:", saveError);
       }
     } catch (error) {
       console.error("Callback query error:", error);
@@ -380,6 +472,20 @@ async function sendQuestion(
       reply_markup: { inline_keyboard: keyboard },
     }
   );
+}
+
+async function getPreviousQuestions(topicId: string): Promise<string[]> {
+  try {
+    const questions = await prisma.question.findMany({
+      where: { session: { topicId } },
+      select: { questionText: true },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return questions.map((q) => q.questionText);
+  } catch {
+    return [];
+  }
 }
 
 function disableButtons(keyboard: InlineKeyboardButton[][]): InlineKeyboardButton[][] {
